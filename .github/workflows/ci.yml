@@ -1,0 +1,56 @@
+name: CI
+
+# Typecheck, build and test on every push and PR to main.
+# These steps are OS-agnostic: the suite runs the pure-TS logic and the JXA
+# script bodies against fakes, so it passes on Linux runners. The Apple Events
+# and private-store paths are only exercised by `npm run doctor` on a real Mac,
+# which CI cannot do — see the note at the bottom of this file.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.13 is the floor (node:sqlite); 24 is what Matt runs. Guard both.
+        node: ["22.13", "24"]
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # npm ci installs exactly what the lockfile pins and fails if it is stale.
+      - run: npm ci
+
+      - name: Typecheck and build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+# WHAT THIS DOES NOT COVER
+# - macOS permission prompts (Automation, Full Disk Access)
+# - Real Apple Events against Reminders.app
+# - Real chat.db, AddressBook, and Reminders private-store reads
+# Those live in `npm run doctor`, which needs a Mac with granted permissions
+# and a signed-in user session. GitHub's macos runners have neither, so there
+# is deliberately no macOS job here — a green build is a logic guarantee, not a
+# proof the Apple integration works on any given machine.
