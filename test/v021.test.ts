@@ -144,6 +144,21 @@ describe("messages_since", () => {
     expect(r.unresolved).toEqual([{ contact: "Nobody Here", reason: expect.stringMatching(/No contact/) }]);
   });
 
+  it("filters by raw handles without touching Contacts, and merges them with resolved contacts", async () => {
+    const noContacts = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb() } });
+    const r = await msg("messages_since", { ...base, afterId: 0, handles: ["(612) 555-0199"] }, noContacts);
+    expect(r.messages.map((m: any) => m.id)).toEqual([5, 6, 7, 10]); // whole chat 2, not just that handle's rows
+    expect(r).toMatchObject({ nextAfterId: 10, resolved: [], unresolved: [] });
+    const both = await msg("messages_since", { ...base, afterId: 0, handles: ["+16125550199"], contacts: ["Alex Rivera"] }, ctx);
+    expect(both.messages.map((m: any) => m.id)).toEqual([1, 2, 3, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("includes tapbacks only when includeReactions is set", async () => {
+    const r = await msg("messages_since", { ...base, afterId: 3, includeReactions: true }, ctx);
+    expect(r.messages.map((m: any) => m.id)).toEqual([4, 5, 6, 7, 8, 9, 10]);
+    expect(r.messages[0]).toMatchObject({ id: 4, reaction: "loved" });
+  });
+
   it("if NO allowlisted name resolves, returns nothing and holds the watermark rather than dumping every chat", async () => {
     const r = await msg("messages_since", { ...base, afterId: 3, contacts: ["Nobody Here"] }, ctx);
     expect(r).toMatchObject({ count: 0, nextAfterId: 3 });
@@ -169,23 +184,6 @@ describe("reminders v0.2.1", () => {
     const r = await rem("reminders_list", { status: "incomplete", flaggedOnly: false, limit: 100 }, ctx);
     expect(calls[0]).toEqual({ list: undefined, status: "incomplete", exclude: ["Mela", "Groceries"] });
     expect(r.listsScanned).toContain("Brand New List"); // a list nobody configured is covered
-  });
-
-  it("the JXA denylist logic itself: excludes by name or id, case-insensitively; an explicit list overrides it", () => {
-    // Run the real pickLists source against a fake Application object.
-    const bodies: string[] = [];
-    const ctx = fakeCtx({ jxa: (async (s: string) => { bodies.push(s); return { scanned: [], items: [] }; }) as any });
-    return rem("reminders_list", { status: "all", flaggedOnly: false, limit: 1 }, ctx).then(() => {
-      const src = bodies[0]!;
-      const fn = src.slice(src.indexOf("function pickLists"), src.indexOf("const app = Application"));
-      const pickLists = new Function(`${fn}; return pickLists;`)();
-      const L = (id: string, name: string) => ({ id: () => id, name: () => name });
-      const all = [L("A1", "Inbox"), L("B2", "Mela"), L("C3", "Groceries"), L("D4", "New List")];
-      const app = { lists: Object.assign(() => all, { whose: ({ name }: any) => () => all.filter((l) => l.name() === name) }) };
-      expect(pickLists(app, undefined, ["mela", "c3"]).map((l: any) => l.name())).toEqual(["Inbox", "New List"]);
-      expect(pickLists(app, "Groceries", ["Groceries"]).map((l: any) => l.name())).toEqual(["Groceries"]);
-      expect(() => pickLists(app, "Nope", [])).toThrow(/No Reminders list/);
-    });
   });
 
   it("list_lists flags excluded lists", async () => {

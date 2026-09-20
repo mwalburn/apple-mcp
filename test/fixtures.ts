@@ -6,8 +6,13 @@ import { encodeAttributedBodyForTest } from "../src/modules/messages/decode.js";
 import { isoToAppleNs } from "../src/modules/messages/db.js";
 import type { ModuleContext } from "../src/core/types.js";
 
-/** Builds a chat.db with the subset of Apple's schema the module reads. */
-export function makeChatDb(): string {
+/**
+ * Builds a chat.db with the subset of Apple's schema the module reads.
+ * `filler` appends that many extra attributedBody-only rows to chat 2 (ids from 1000),
+ * all newer than the base rows. SQL cannot prefilter them, so they must be decoded
+ * in Node — for tests that need to exhaust a scan limit.
+ */
+export function makeChatDb(opts: { filler?: number } = {}): string {
   const path = join(mkdtempSync(join(tmpdir(), "applemcp-")), "chat.db");
   const db = new DatabaseSync(path);
   db.exec(`
@@ -44,6 +49,11 @@ export function makeChatDb(): string {
   for (const [id, chat, text, blob, handle, minAgo, fromMe, attach, amt] of rows) {
     ins.run(id, `m${id}`, text, blob, handle, at(minAgo), fromMe, "iMessage", attach, amt);
     join_.run(chat, id);
+  }
+  for (let i = 0; i < (opts.filler ?? 0); i++) {
+    const id = 1000 + i;
+    ins.run(id, `m${id}`, null, encodeAttributedBodyForTest(`filler ${i}`), 3, at(20) + BigInt(i), 0, "iMessage", 0, 0);
+    join_.run(2, id);
   }
   db.close();
   return path;

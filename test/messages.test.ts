@@ -14,6 +14,14 @@ describe("attributedBody decoder", () => {
     expect(decodeAttributedBody(encodeAttributedBodyForTest(long))).toBe(long);
     expect(decodeAttributedBody(encodeAttributedBodyForTest("plain NSString", false))).toBe("plain NSString");
   });
+  it("decodes the 32-bit (0x82) length prefix used for bodies over 64 KiB", () => {
+    const huge = "ab".repeat(40_000); // 80,000 bytes > 0xffff
+    const blob = encodeAttributedBodyForTest(huge);
+    expect(blob.indexOf(Buffer.from([0x2b, 0x82]))).toBeGreaterThan(0);
+    expect(decodeAttributedBody(blob)).toBe(huge);
+    // A declared length that overruns the buffer is rejected, not read out of bounds.
+    expect(decodeAttributedBody(blob.subarray(0, blob.length - 10))).toBeNull();
+  });
   it("returns null on garbage instead of throwing", () => {
     expect(decodeAttributedBody(null)).toBeNull();
     expect(decodeAttributedBody(Buffer.from("no markers here"))).toBeNull();
@@ -59,6 +67,16 @@ describe("messages tools against a fixture chat.db", () => {
     expect(r.messages[3]).toMatchObject({ fromMe: true, sender: "me", text: "Reply from me — with unicode ✓" });
   });
 
+  it("pages backwards with until and treats since/until as a half-open window", async () => {
+    const all = await call("messages_get_chat", { chatId: 1, limit: 50, includeReactions: false }, ctx);
+    const dateOf = (id: number) => all.messages.find((m: any) => m.id === id).date;
+    const ids = async (a: any) => (await call("messages_get_chat", { chatId: 1, limit: 50, includeReactions: false, ...a }, ctx)).messages.map((m: any) => m.id);
+    expect(await ids({ until: dateOf(3) })).toEqual([8, 1, 2]);              // until is exclusive
+    expect(await ids({ since: dateOf(2), until: dateOf(9) })).toEqual([2, 3]); // since is inclusive
+    expect(await ids({ since: dateOf(9) })).toEqual([9]);
+    expect(await ids({ since: dateOf(9), until: dateOf(9) })).toEqual([]);
+  });
+
   it("labels reactions when asked", async () => {
     const r = await call("messages_get_chat", { chatId: 1, limit: 50, includeReactions: true }, ctx);
     expect(r.messages.find((m: any) => m.id === 4).reaction).toBe("loved");
@@ -81,6 +99,20 @@ describe("messages tools against a fixture chat.db", () => {
     expect((await call("messages_search", { ...base, query: "100%" }, ctx)).count).toBe(1);
     expect((await call("messages_search", { ...base, query: "sure_" }, ctx)).count).toBe(1);
     expect((await call("messages_search", { ...base, query: "zzz" }, ctx)).count).toBe(0);
+  });
+
+  it("reports scanned and truncated when scanLimit is exhausted before the window", async () => {
+    const big = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb({ filler: 150 }) } });
+    // 150 filler rows are newer than every base row, so a limit of 100 never reaches them.
+    const cut = await call("messages_search", { query: "Plain text", limit: 25, scanLimit: 100 }, big);
+    expect(cut).toMatchObject({ count: 0, scanned: 100, truncated: true });
+    // Once `limit` hits are found the scan stops early and is not reported as truncated.
+    const full = await call("messages_search", { query: "filler", limit: 5, scanLimit: 100 }, big);
+    expect(full).toMatchObject({ count: 5, scanned: 5, truncated: false });
+    // Exhausting the window under scanLimit is not truncation either.
+    const done = await call("messages_search", { query: "Plain text", limit: 25, scanLimit: 1000 }, big);
+    expect(done).toMatchObject({ count: 1, truncated: false });
+    expect(done.scanned).toBeLessThan(1000);
   });
 
   it("scopes search by chat and date", async () => {
