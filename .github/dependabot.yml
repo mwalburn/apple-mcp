@@ -1,0 +1,29 @@
+# Weekly update PRs for the two things this repo actually depends on:
+# the GitHub Actions it pins and its npm dev toolchain (typescript, vitest,
+# @types/node). The runtime deps (@modelcontextprotocol/sdk, zod) are grouped
+# separately so an SDK bump is reviewed on its own rather than mixed into a
+# batch of tooling updates.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+      runtime:
+        dependency-type: production

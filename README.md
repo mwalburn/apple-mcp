@@ -1,5 +1,8 @@
 # apple-mcp
 
+[![CI](https://github.com/mwalburn/apple-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/mwalburn/apple-mcp/actions/workflows/ci.yml)
+
+
 Local, read-only MCP server for Apple apps on macOS. Modules: **Reminders**, **Messages**, **Contacts**.
 Runs over stdio as a child process of Claude Desktop / Cowork / Claude Code. Nothing leaves the Mac except what the model reads through tool calls.
 
