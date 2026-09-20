@@ -1,0 +1,24 @@
+{
+  "name": "apple-mcp",
+  "version": "0.3.1",
+  "description": "Local, read-only MCP server for Apple apps on macOS (Reminders, Messages, Contacts). Modular.",
+  "type": "module",
+  "private": true,
+  "bin": { "apple-mcp": "dist/index.js" },
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "doctor": "node dist/doctor.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
