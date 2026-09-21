@@ -75,19 +75,30 @@ return ids;
 `;
 
 /**
- * Bulk lookup by id for sync ledgers. A missing id is reported, not thrown:
- * "deleted" is a state the caller has to handle differently from "completed".
+ * Bulk lookup by id for sync ledgers. Cost is per list, not per id.
+ * A missing id is reported, not thrown: "deleted" is a state the caller
+ * has to handle differently from "completed".
  */
 export const STATUS = `
 const app = Application("Reminders");
 const iso = (d) => (d ? new Date(d).toISOString() : null);
-return args.ids.map((id) => {
-  try {
-    const r = app.reminders.byId(id);
-    return { id, found: true, name: r.name(), list: r.container().name(), completed: r.completed(),
-             completionDate: iso(r.completionDate()), dueDate: iso(r.dueDate()), modifiedAt: iso(r.modificationDate()) };
-  } catch (e) { return { id, found: false }; }
-});
+const wanted = new Set(args.ids);
+const found = {};
+// One event per list to read ids; five more only for lists holding a tracked id.
+for (const l of app.lists()) {
+  const all = l.reminders;
+  const ids = all.id();
+  const hit = [];
+  for (let i = 0; i < ids.length; i++) if (wanted.has(ids[i])) hit.push(i);
+  if (!hit.length) continue;
+  const listName = l.name();
+  const names = all.name(), done = all.completed(), compl = all.completionDate(),
+        due = all.dueDate(), mod = all.modificationDate();
+  for (const i of hit)
+    found[ids[i]] = { id: ids[i], found: true, name: names[i], list: listName, completed: !!done[i],
+                      completionDate: iso(compl[i]), dueDate: iso(due[i]), modifiedAt: iso(mod[i]) };
+}
+return args.ids.map((id) => found[id] || { id, found: false });
 `;
 
 export const GET_REMINDER = `
