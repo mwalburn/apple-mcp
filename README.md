@@ -41,7 +41,8 @@ Requires macOS and Node >= 22.13 (uses the built-in `node:sqlite`, so no native 
 ```sh
 npm install
 npm run build
-npm test
+npm run typecheck  # tsc over src/ and test/
+npm test           # needs dist/ from the build: one test spawns the real stdio server
 npm run doctor     # triggers permission prompts, reports per-module OK/FAIL with timings; adopts APPLE_MCP_* env from Claude's config
 ```
 
@@ -195,5 +196,5 @@ src/
     reminders/        JXA
     messages/         SQLite + attributedBody decoder
     contacts/         SQLite over AddressBook; publishes the handleResolver service
-test/                 vitest: fixture chat.db, faked osascript, in-memory MCP client
+test/                 vitest: fixture chat.db, faked osascript, in-memory and stdio MCP clients
 ```

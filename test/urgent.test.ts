@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { normalizeId, loadUrgency, urgencyOf } from "../src/modules/reminders/store.js";
 import { remindersModule } from "../src/modules/reminders/index.js";
+import { INCOMPLETE_IDS } from "../src/modules/reminders/scripts.js";
 import { makeRemindersStoreDir, fakeCtx } from "./fixtures.js";
 
 const id = (n: number) => `x-apple-reminder://${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
@@ -59,7 +60,7 @@ describe("urgent on tool output", () => {
 
   it("doctor reports the join rate so a silent mismatch is visible", async () => {
     const ctx = fakeCtx({ env: { APPLE_MCP_REMINDERS_STORE_DIR: makeRemindersStoreDir() },
-      jxa: (async (s: string) => (s.includes("let ids = []") ? [id(1), id(3), id(9)] : [1, 2])) as any });
+      jxa: (async (s: string) => (s === INCOMPLETE_IDS ? [id(1), id(3), id(9)] : [1, 2])) as any });
     expect(await remindersModule.check!(ctx)).toBe("2 list(s) visible; urgent flag: matched 2/3 reminders across 2 store(s), 1 urgent");
   });
 

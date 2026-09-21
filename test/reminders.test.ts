@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { filterReminders, remindersModule, type Reminder } from "../src/modules/reminders/index.js";
-import { makeJxaRunner } from "../src/core/jxa.js";
+import { makeJxaRunner, wrapScript } from "../src/core/jxa.js";
+import { LIST_LISTS, LIST_REMINDERS, GET_REMINDER, STATUS } from "../src/modules/reminders/scripts.js";
 import { fakeCtx } from "./fixtures.js";
 
 const r = (o: Partial<Reminder>): Reminder => ({
@@ -47,22 +48,39 @@ describe("JXA runner", () => {
     expect(seen.file).toBe("/usr/bin/osascript");
     expect(seen.args.slice(0, 3)).toEqual(["-l", "JavaScript", "-e"]);
     expect(JSON.parse(seen.args[4])).toEqual({ a: "b'\"$(rm -rf)" });
+    // The wrapper osascript receives is itself valid JavaScript and round-trips args -> return value.
+    const run = new Function(`${seen.args[3]}; return run;`)() as (argv: string[]) => string;
+    expect(JSON.parse(run([seen.args[4]]))).toBe(1);
+  });
+  it("maps an empty or undefined script result to null", async () => {
+    const jxa = makeJxaRunner(async () => ({ stdout: "", stderr: "" }));
+    expect(await jxa("return;")).toBeNull();
+    const run = new Function(`${wrapScript("const x = 1;")}; return run;`)() as (argv: string[]) => string;
+    expect(run(["{}"])).toBe("null");
+  });
+  it("maps timeouts and missing osascript to actionable errors", async () => {
+    const timedOut = makeJxaRunner(async () => { throw Object.assign(new Error("killed"), { killed: true, stderr: "" }); });
+    await expect(timedOut("return 1;")).rejects.toMatchObject({ message: /did not respond/, hint: /Narrow the query/ });
+    const noOsa = makeJxaRunner(async () => { throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT", stderr: "" }); });
+    await expect(noOsa("return 1;")).rejects.toMatchObject({ message: /only runs on macOS/ });
   });
   it("maps the automation-denied error to an actionable hint", async () => {
     const jxa = makeJxaRunner(async () => { throw Object.assign(new Error("x"), { stderr: "execution error: Not authorized to send Apple events to Reminders. (-1743)" }); });
     await expect(jxa("return 1;")).rejects.toMatchObject({ hint: expect.stringMatching(/Automation/) });
   });
-  it("wrapped script is valid JavaScript", () => {
-    // Syntax-check every JXA body by compiling (not running) it.
-    const bodies: string[] = [];
+  it("every tool sends one of the exported script bodies, wrapped, and passes its input as args", async () => {
+    const calls: { script: string; args: any }[] = [];
     // One fake serves tools that expect an array and tools that expect {scanned, items}.
-    const ctx = fakeCtx({ jxa: (async (s: string) => { bodies.push(s); return Object.assign([], { scanned: [], items: [] }); }) as any });
-    return Promise.all([
-      remindersModule.tools[0]!.handler({}, ctx),
-      remindersModule.tools[1]!.handler({ status: "all", flaggedOnly: false, limit: 1 }, ctx),
-      remindersModule.tools[3]!.handler({ id: "x" }, ctx),
-      remindersModule.tools.find((t) => t.name === "reminders_status")!.handler({ ids: ["x"] }, ctx),
-    ]).then(() => { expect(bodies).toHaveLength(4);
-      for (const b of bodies) expect(() => new Function("args", "Application", b)).not.toThrow(); });
+    const ctx = fakeCtx({ env: { APPLE_MCP_REMINDERS_STORE_DIR: "/nonexistent" }, jxa: (async (s: string, a: unknown) => { calls.push({ script: s, args: a }); return Object.assign([], { scanned: [], items: [] }); }) as any });
+    const tool = (n: string) => remindersModule.tools.find((t) => t.name === n)!;
+    await tool("reminders_list_lists").handler({}, ctx);
+    await tool("reminders_list").handler({ status: "all", flaggedOnly: false, limit: 1 }, ctx);
+    await tool("reminders_search").handler({ query: "q", status: "incomplete", limit: 1 }, ctx);
+    await tool("reminders_get").handler({ id: "x" }, ctx);
+    await tool("reminders_status").handler({ ids: ["x"] }, ctx);
+    expect(calls.map((c) => c.script)).toEqual([LIST_LISTS, LIST_REMINDERS, LIST_REMINDERS, GET_REMINDER, STATUS]);
+    expect(calls[3]!.args).toEqual({ id: "x" });
+    expect(calls[4]!.args).toEqual({ ids: ["x"] });
+    for (const c of calls) expect(() => new Function(wrapScript(c.script))).not.toThrow();
   });
 });

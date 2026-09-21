@@ -19,6 +19,11 @@ describe("redaction", () => {
     ["the wifi Password is CorrectHorse9", "the wifi Password is [redacted]"],
     ["PIN - 4821", "PIN - [redacted]"],
     ["Your Chase verification code is 482913. Do not share it.", "Your Chase verification code is [redacted]. Do not share it."],
+    ["Use 30419 as your Apple ID code", "Use [redacted] as your Apple ID code"],
+    ["2FA: 8841", "2FA: [redacted]"],
+    ["Your one-time passcode is 5566 7788", "Your one-time passcode is [redacted] [redacted]"],
+    ["Your Uber code is 1234. Reply STOP to unsubscribe", "Your Uber code is [redacted]. Reply STOP to unsubscribe"],
+    ["OTP 482913 expires in 10 minutes", "OTP [redacted] expires in 10 minutes"],
     ["card 4111 1111 1111 1111 exp 04/29", "card [redacted] exp 04/29"],
     ["ssn 123-45-6789", "ssn [redacted]"],
     ["https://share.1password.com/s#AbC-dEf_123456", "https://share.1password.com/[redacted]"],
@@ -34,6 +39,11 @@ describe("redaction", () => {
     "Can you please send me the password once you reset it?", // asks about a password, contains none
     "https://www.icloud.com/notes/0a7OBCKKiu1Y#Costco",         // ordinary shared links are not secrets
     "https://www.masterboltz.com/user/login",
+    "Login is at 1600 Pennsylvania Ave, see you in 2026", // "login" alone is not a code context
+    "Can you verify the invoice total is 12500?",        // nor is "verify"
+    "Sign in opens at 0900",
+    "Flight code is DL1234, gate B12",                    // digits glued to letters are not codes
+    "The discount code saves you $1500",                  // currency is not a code
   ];
   it.each(untouched)("leaves %j alone", (t) => expect(redact(t)).toEqual({ text: t, redacted: false }));
 });
@@ -144,6 +154,21 @@ describe("messages_since", () => {
     expect(r.unresolved).toEqual([{ contact: "Nobody Here", reason: expect.stringMatching(/No contact/) }]);
   });
 
+  it("filters by raw handles without touching Contacts, and merges them with resolved contacts", async () => {
+    const noContacts = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb() } });
+    const r = await msg("messages_since", { ...base, afterId: 0, handles: ["(612) 555-0199"] }, noContacts);
+    expect(r.messages.map((m: any) => m.id)).toEqual([5, 6, 7, 10]); // whole chat 2, not just that handle's rows
+    expect(r).toMatchObject({ nextAfterId: 10, resolved: [], unresolved: [] });
+    const both = await msg("messages_since", { ...base, afterId: 0, handles: ["+16125550199"], contacts: ["Alex Rivera"] }, ctx);
+    expect(both.messages.map((m: any) => m.id)).toEqual([1, 2, 3, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("includes tapbacks only when includeReactions is set", async () => {
+    const r = await msg("messages_since", { ...base, afterId: 3, includeReactions: true }, ctx);
+    expect(r.messages.map((m: any) => m.id)).toEqual([4, 5, 6, 7, 8, 9, 10]);
+    expect(r.messages[0]).toMatchObject({ id: 4, reaction: "loved" });
+  });
+
   it("if NO allowlisted name resolves, returns nothing and holds the watermark rather than dumping every chat", async () => {
     const r = await msg("messages_since", { ...base, afterId: 3, contacts: ["Nobody Here"] }, ctx);
     expect(r).toMatchObject({ count: 0, nextAfterId: 3 });
@@ -169,23 +194,6 @@ describe("reminders v0.2.1", () => {
     const r = await rem("reminders_list", { status: "incomplete", flaggedOnly: false, limit: 100 }, ctx);
     expect(calls[0]).toEqual({ list: undefined, status: "incomplete", exclude: ["Mela", "Groceries"] });
     expect(r.listsScanned).toContain("Brand New List"); // a list nobody configured is covered
-  });
-
-  it("the JXA denylist logic itself: excludes by name or id, case-insensitively; an explicit list overrides it", () => {
-    // Run the real pickLists source against a fake Application object.
-    const bodies: string[] = [];
-    const ctx = fakeCtx({ jxa: (async (s: string) => { bodies.push(s); return { scanned: [], items: [] }; }) as any });
-    return rem("reminders_list", { status: "all", flaggedOnly: false, limit: 1 }, ctx).then(() => {
-      const src = bodies[0]!;
-      const fn = src.slice(src.indexOf("function pickLists"), src.indexOf("const app = Application"));
-      const pickLists = new Function(`${fn}; return pickLists;`)();
-      const L = (id: string, name: string) => ({ id: () => id, name: () => name });
-      const all = [L("A1", "Inbox"), L("B2", "Mela"), L("C3", "Groceries"), L("D4", "New List")];
-      const app = { lists: Object.assign(() => all, { whose: ({ name }: any) => () => all.filter((l) => l.name() === name) }) };
-      expect(pickLists(app, undefined, ["mela", "c3"]).map((l: any) => l.name())).toEqual(["Inbox", "New List"]);
-      expect(pickLists(app, "Groceries", ["Groceries"]).map((l: any) => l.name())).toEqual(["Groceries"]);
-      expect(() => pickLists(app, "Nope", [])).toThrow(/No Reminders list/);
-    });
   });
 
   it("list_lists flags excluded lists", async () => {

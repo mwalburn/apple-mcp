@@ -15,10 +15,11 @@ const RULES: { name: string; re: RegExp; replace: (m: string, ...g: string[]) =>
     re: /\b(pass(?:word|code|phrase)?|pwd|pw|pin|passkey|secret|api[ _-]?key|token)\b(\s*(?:is|was|=|:|-|–)\s*)(\S+)/gi,
     replace: (_m, label, sep) => `${label}${sep}${R}` },
   // "Username: x" is not secret on its own, but it is one half of a login; keep it. Deliberately no rule.
-  // One-time codes: a 4-8 digit run in a message that talks about codes.
+  // One-time codes: a standalone 4-8 digit run in a message that names a code.
+  // Digits glued to letters (DL1234) or a currency sign are not codes.
   { name: "otp",
-    re: /^(?=[\s\S]*\b(?:code|verification|verify|one[- ]time|otp|2fa|passcode|security code|login|log in|sign[- ]in)\b)[\s\S]*$/i,
-    replace: (m) => m.replace(/(?<![\d-])\d{4,8}(?![\d-])/g, R) },
+    re: /^(?=[\s\S]*\b(?:code|one[- ]time|otp|2fa|passcode)\b)[\s\S]*$/i,
+    replace: (m) => m.replace(/(?<![\w$€£-])\d{4,8}(?![\w-])/g, R) },
   // Secret-sharing links. The URL itself is the credential: anyone holding it can open the item.
   { name: "secret-link",
     re: /https?:\/\/(?:share\.1password\.com|send\.bitwarden\.com|(?:www\.)?onetimesecret\.com|(?:www\.)?privnote\.com|pwpush\.com|(?:www\.)?password\.link|vault\.bitwarden\.com\/#\/send|yopass\.se)\/\S+/gi,

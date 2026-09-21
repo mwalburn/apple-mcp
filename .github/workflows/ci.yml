@@ -43,6 +43,11 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
+      # The build only covers src/; this holds the tests to the same strictness.
+      - name: Typecheck tests
+        run: npm run typecheck
+
+      # Includes a real stdio round-trip against dist/index.js, so build must come first.
       - name: Test
         run: npm test
 

@@ -21,9 +21,13 @@ const defaultExec: ExecFn = (file, args, opts) =>
  * value. Arguments travel via argv (execFile, no shell), never by string
  * interpolation into the script, so there is no injection path.
  */
+export function wrapScript(body: string): string {
+  return `function run(argv){const args=JSON.parse(argv[0]);const out=(function(){${body}\n})();return JSON.stringify(out===undefined?null:out);}`;
+}
+
 export function makeJxaRunner(exec: ExecFn = defaultExec, timeoutMs = 60_000) {
   return async function jxa<T = unknown>(body: string, args: unknown = {}): Promise<T> {
-    const script = `function run(argv){const args=JSON.parse(argv[0]);const out=(function(){${body}\n})();return JSON.stringify(out===undefined?null:out);}`;
+    const script = wrapScript(body);
     try {
       const { stdout } = await exec(
         "/usr/bin/osascript",
