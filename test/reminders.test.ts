@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { filterReminders, remindersModule, type Reminder } from "../src/modules/reminders/index.js";
+import { filterReminders, remindersModule, excludedLists, type Reminder } from "../src/modules/reminders/index.js";
 import { makeJxaRunner, wrapScript } from "../src/core/jxa.js";
 import { LIST_LISTS, LIST_REMINDERS, GET_REMINDER, STATUS } from "../src/modules/reminders/scripts.js";
 import { fakeCtx } from "./fixtures.js";
@@ -13,6 +13,7 @@ const data = [
   r({ id: "b", name: "Call plumber", notes: "about the WATER heater", dueDate: "2026-09-20T14:00:00.000Z", flagged: true }),
   r({ id: "c", name: "Someday" }),
 ];
+const rem = (n: string, a: any, ctx: any) => remindersModule.tools.find((t) => t.name === n)!.handler(a, ctx) as Promise<any>;
 
 describe("filterReminders", () => {
   it("sorts by due date, undated last", () =>
@@ -82,5 +83,37 @@ describe("JXA runner", () => {
     expect(calls[3]!.args).toEqual({ id: "x" });
     expect(calls[4]!.args).toEqual({ ids: ["x"] });
     for (const c of calls) expect(() => new Function(wrapScript(c.script))).not.toThrow();
+  });
+});
+
+describe("reminders v0.2.1", () => {
+  const mk = (o: Partial<Reminder>): Reminder => ({ id: "x", list: "Home", name: "n", notes: null, completed: false, dueDate: null, priority: 0, flagged: false, completionDate: null, modifiedAt: null, ...o });
+
+  it("parses the denylist", () => {
+    expect(excludedLists({ APPLE_MCP_REMINDERS_EXCLUDE: " Mela, Groceries ,," })).toEqual(["Mela", "Groceries"]);
+    expect(excludedLists({})).toEqual([]);
+  });
+
+  it("modifiedAfter keeps changed items and anything without a modification date", () => {
+    const items = [mk({ id: "old", modifiedAt: "2026-09-19T00:00:00.000Z" }), mk({ id: "new", modifiedAt: "2026-09-20T12:00:00.000Z" }), mk({ id: "unknown" })];
+    expect(filterReminders(items, { limit: 10, modifiedAfter: "2026-09-20T00:00:00Z" }).map((r) => r.id).sort()).toEqual(["new", "unknown"]);
+  });
+
+  it("passes the denylist to JXA only as data, and reports which lists were scanned", async () => {
+    const calls: any[] = [];
+    const ctx = fakeCtx({ env: { APPLE_MCP_REMINDERS_EXCLUDE: "Mela,Groceries" }, jxa: (async (_s: string, args: any) => { calls.push(args); return { scanned: ["Inbox", "Home", "Brand New List"], items: [] }; }) as any });
+    const r = await rem("reminders_list", { status: "incomplete", flaggedOnly: false, limit: 100 }, ctx);
+    expect(calls[0]).toEqual({ list: undefined, status: "incomplete", exclude: ["Mela", "Groceries"] });
+    expect(r.listsScanned).toContain("Brand New List");
+  });
+
+  it("list_lists flags excluded lists", async () => {
+    const ctx = fakeCtx({ env: { APPLE_MCP_REMINDERS_EXCLUDE: "mela" }, jxa: (async () => [{ id: "1", name: "Inbox", incomplete: 1 }, { id: "2", name: "Mela", incomplete: 19 }]) as any });
+    expect((await rem("reminders_list_lists", {}, ctx)).map((l: any) => l.excluded)).toEqual([false, true]);
+  });
+
+  it("reminders_status separates completed from deleted", async () => {
+    const ctx = fakeCtx({ jxa: (async () => [{ id: "a", found: true, completed: true }, { id: "b", found: true, completed: false }, { id: "c", found: false }]) as any });
+    expect(await rem("reminders_status", { ids: ["a", "b", "c"] }, ctx)).toMatchObject({ count: 3, completed: 1, missing: 1 });
   });
 });
