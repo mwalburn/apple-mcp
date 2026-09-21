@@ -49,8 +49,20 @@ export function withDb<T>(ctx: ModuleContext, fn: (db: DatabaseSync) => T): T {
  * before values reach JS (DATE_MS), and bounds are bound as BigInt going in.
  * Older rows stored plain seconds; DATE_MS handles both.
  */
+/** Values above this are nanoseconds; at or below, legacy seconds. */
+const NS_THRESHOLD = 100_000_000_000n;
+
 export const DATE_MS = (col: string) =>
-  `CASE WHEN ${col} > 100000000000 THEN ${col} / 1000000 ELSE ${col} * 1000 END`;
+  `CASE WHEN ${col} > ${NS_THRESHOLD} THEN ${col} / 1000000 ELSE ${col} * 1000 END`;
+
+/** WHERE fragment bounding an Apple-epoch column by an instant, for both ns rows and legacy seconds rows. */
+export function dateBound(col: string, op: ">=" | "<", iso: string): { sql: string; params: bigint[] } {
+  const ns = isoToAppleNs(iso);
+  const s = ns >= 0n ? (ns + 999_999_999n) / 1_000_000_000n : ns / 1_000_000_000n;
+  return op === ">="
+    ? { sql: `(${col} >= ? OR ${col} BETWEEN ? AND ${NS_THRESHOLD})`, params: [ns, s] }
+    : { sql: `(${col} < ? AND (${col} > ${NS_THRESHOLD} OR ${col} < ?))`, params: [ns, s] };
+}
 
 export function appleMsToIso(ms: number | null): string | null {
   if (!ms) return null;

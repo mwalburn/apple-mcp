@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { decodeAttributedBody, encodeAttributedBodyForTest } from "../src/modules/messages/decode.js";
-import { appleMsToIso, isoToAppleNs, handleClause, escapeLike } from "../src/modules/messages/db.js";
+import { appleMsToIso, isoToAppleNs, dateBound, handleClause, escapeLike } from "../src/modules/messages/db.js";
 import { messagesModule } from "../src/modules/messages/index.js";
 import { makeChatDb, fakeCtx } from "./fixtures.js";
 
@@ -136,9 +136,40 @@ describe("messages tools against a fixture chat.db", () => {
 });
 
 describe("legacy date handling", () => {
+  it("bounds both epochs with a ceil second threshold", () => {
+    expect(dateBound("m.date", ">=", "2001-01-01T00:00:01.500Z").params).toEqual([1_500_000_000n, 2n]);
+  });
+
   it("reads rows stored as seconds", async () => {
     const ctx = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb() } });
     const r = await call("messages_get_chat", { chatId: 1, limit: 50, includeReactions: false }, ctx);
     expect(r.messages[0]).toMatchObject({ id: 8, date: "2016-11-05T00:53:20.000Z" });
+  });
+
+  it("applies inclusive and exclusive bounds to legacy seconds rows", async () => {
+    const ctx = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb() } });
+    const callWindow = (window: { since?: string; until?: string }) =>
+      call("messages_get_chat", { chatId: 1, limit: 50, includeReactions: false, ...window }, ctx);
+    expect((await callWindow({ since: "2016-11-01T00:00:00Z", until: "2016-12-01T00:00:00Z" })).messages.map((m: any) => m.id)).toEqual([8]);
+    expect((await callWindow({ since: "2016-11-05T00:53:20Z" })).messages.map((m: any) => m.id)).toContain(8);
+    expect((await callWindow({ since: "2016-11-01T00:00:00Z", until: "2016-11-05T00:53:20Z" })).messages.map((m: any) => m.id)).not.toContain(8);
+    expect((await callWindow({ since: "2016-11-06T00:00:00Z", until: "2016-12-01T00:00:00Z" })).messages).toEqual([]);
+  });
+
+  it("includes legacy rows in chat list date windows", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2016-11-10T00:00:00Z"));
+    try {
+      const path = makeChatDb();
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(path);
+      db.exec("DELETE FROM chat_message_join WHERE message_id IN (1,2,3,4,9); DELETE FROM message WHERE ROWID IN (1,2,3,4,9)");
+      db.close();
+      const ctx = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: path } });
+      const r = await call("messages_list_chats", { sinceDays: 30, limit: 200 }, ctx);
+      expect(r.chats.find((c: any) => c.chatId === 1)).toMatchObject({ lastMessageAt: "2016-11-05T00:53:20.000Z" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
