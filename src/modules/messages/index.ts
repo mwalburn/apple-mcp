@@ -213,7 +213,7 @@ export const messagesModule: AppModule = {
           const target = resolveTarget(a, ctx, db);
           const { where, params } = scope({ ...a, handles: target.handles });
           // Rows whose plain-text column exists but does not match can be dropped in SQL.
-          where.push(`((m.text IS NOT NULL AND m.text LIKE ? ESCAPE '\\') OR (m.text IS NULL AND m.attributedBody IS NOT NULL))`);
+          where.push(`((m.text IS NOT NULL AND TRIM(m.text) <> '' AND m.text LIKE ? ESCAPE '\\') OR ((m.text IS NULL OR TRIM(m.text) = '') AND m.attributedBody IS NOT NULL))`);
           params.push(`%${escapeLike(a.query)}%`);
           const stmt = db.prepare(`${MESSAGE_SELECT} WHERE ${where.join(" AND ")} ORDER BY m.date DESC LIMIT ?`);
           const needle = a.query.toLowerCase();
