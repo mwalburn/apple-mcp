@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ACCESS_ORDER, UserFacingError, type AppModule, type ModuleContext } from "./types.js";
 import type { ServerConfig } from "./config.js";
+import { VERSION } from "./version.js";
 
 export function selectModules(all: AppModule[], cfg: ServerConfig): AppModule[] {
   if (!cfg.enabledModules) return all;
@@ -10,7 +11,7 @@ export function selectModules(all: AppModule[], cfg: ServerConfig): AppModule[] 
 }
 
 export function buildServer(modules: AppModule[], cfg: ServerConfig, ctx: ModuleContext): McpServer {
-  const server = new McpServer({ name: "apple-mcp", version: "0.3.2" });
+  const server = new McpServer({ name: "apple-mcp", version: VERSION });
   const seen = new Set<string>();
   const selected = selectModules(modules, cfg);
 
