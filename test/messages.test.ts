@@ -101,6 +101,14 @@ describe("messages tools against a fixture chat.db", () => {
     expect((await call("messages_search", { ...base, query: "zzz" }, ctx)).count).toBe(0);
   });
 
+  it("searches attributed bodies when the text column is blank", async () => {
+    const blank = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb({ blankText: true }) } });
+    const result = await call("messages_search", { query: "unique-blank-text-word", limit: 25, scanLimit: 50_000 }, blank);
+    expect(result.messages.map((m: any) => m.id)).toEqual([11]);
+    const chat = await call("messages_get_chat", { chatId: 2, limit: 50, includeReactions: false }, blank);
+    expect(chat.messages.find((m: any) => m.id === 11).text).toBe("unique-blank-text-word");
+  });
+
   it("reports scanned and truncated when scanLimit is exhausted before the window", async () => {
     const big = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb({ filler: 150 }) } });
     // 150 filler rows are newer than every base row, so a limit of 100 never reaches them.

@@ -12,7 +12,7 @@ import type { ModuleContext } from "../src/core/types.js";
  * all newer than the base rows. SQL cannot prefilter them, so they must be decoded
  * in Node — for tests that need to exhaust a scan limit.
  */
-export function makeChatDb(opts: { filler?: number } = {}): string {
+export function makeChatDb(opts: { filler?: number; blankText?: boolean } = {}): string {
   const path = join(mkdtempSync(join(tmpdir(), "applemcp-")), "chat.db");
   const db = new DatabaseSync(path);
   db.exec(`
@@ -49,6 +49,10 @@ export function makeChatDb(opts: { filler?: number } = {}): string {
   for (const [id, chat, text, blob, handle, minAgo, fromMe, attach, amt] of rows) {
     ins.run(id, `m${id}`, text, blob, handle, at(minAgo), fromMe, "iMessage", attach, amt);
     join_.run(chat, id);
+  }
+  if (opts.blankText) {
+    ins.run(11, "m11", "   ", encodeAttributedBodyForTest("unique-blank-text-word"), 3, at(10), 0, "iMessage", 0, 0);
+    join_.run(2, 11);
   }
   for (let i = 0; i < (opts.filler ?? 0); i++) {
     const id = 1000 + i;
