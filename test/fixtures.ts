@@ -6,6 +6,14 @@ import { encodeAttributedBodyForTest } from "../src/modules/messages/decode.js";
 import { isoToAppleNs } from "../src/modules/messages/db.js";
 import type { ModuleContext } from "../src/core/types.js";
 
+export const TEMP_DIRS: string[] = [];
+
+export function makeTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  TEMP_DIRS.push(dir);
+  return dir;
+}
+
 /**
  * Builds a chat.db with the subset of Apple's schema the module reads.
  * `filler` appends that many extra attributedBody-only rows to chat 2 (ids from 1000),
@@ -13,7 +21,7 @@ import type { ModuleContext } from "../src/core/types.js";
  * in Node — for tests that need to exhaust a scan limit.
  */
 export function makeChatDb(opts: { filler?: number } = {}): string {
-  const path = join(mkdtempSync(join(tmpdir(), "applemcp-")), "chat.db");
+  const path = join(makeTempDir("applemcp-"), "chat.db");
   const db = new DatabaseSync(path);
   db.exec(`
     CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
@@ -65,7 +73,7 @@ export function fakeCtx(over: Partial<ModuleContext> = {}): ModuleContext {
 
 /** AddressBook layout: one top-level store plus one per account under Sources/. Handles line up with makeChatDb(). */
 export function makeContactsDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "applemcp-ab-"));
+  const dir = makeTempDir("applemcp-ab-");
   const schema = `
     CREATE TABLE ZABCDRECORD (Z_PK INTEGER PRIMARY KEY, ZFIRSTNAME TEXT, ZLASTNAME TEXT, ZNICKNAME TEXT, ZORGANIZATION TEXT);
     CREATE TABLE ZABCDPHONENUMBER (Z_PK INTEGER PRIMARY KEY, ZOWNER INTEGER, ZFULLNUMBER TEXT, ZLABEL TEXT);
@@ -90,7 +98,7 @@ export function makeContactsDir(): string {
 
 /** Reminders stores: one per account. Exercises every id encoding the real schema might use. */
 export function makeRemindersStoreDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "applemcp-rem-"));
+  const dir = makeTempDir("applemcp-rem-");
   const hexToBlob = (h: string) => Buffer.from(h.replace(/-/g, ""), "hex");
   const mk = (file: string, ddl: string, fill: (db: DatabaseSync) => void) => { const db = new DatabaseSync(join(dir, file)); db.exec(ddl); fill(db); db.close(); };
   const full = `CREATE TABLE ZREMCDREMINDER (Z_PK INTEGER PRIMARY KEY, ZCKIDENTIFIER TEXT, ZIDENTIFIER BLOB, ZDACALENDARITEMUNIQUEIDENTIFIER TEXT, ZISURGENTSTATEENABLEDFORCURRENTUSER INTEGER, ZFLAGGED INTEGER);`;

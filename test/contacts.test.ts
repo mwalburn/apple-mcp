@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { handleKey, cleanLabel, loadContacts, searchContacts, makeResolver } from "../src/modules/contacts/directory.js";
+import { handleKey, cleanLabel, loadContacts, searchContacts, makeResolver, candidatesForName } from "../src/modules/contacts/directory.js";
 import { contactsModule } from "../src/modules/contacts/index.js";
 import { messagesModule } from "../src/modules/messages/index.js";
 import { makeChatDb, makeContactsDir, fakeCtx } from "./fixtures.js";
@@ -125,5 +125,40 @@ describe("messages + contacts integration", () => {
     const bare = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb() } });
     await expect(msg("messages_get_chat", { contact: "Alex", limit: 5, includeReactions: false }, bare)).rejects.toThrow(/contacts module/);
     expect((await msg("messages_get_chat", { handle: "6515550100", limit: 5, includeReactions: false }, bare)).count).toBeGreaterThan(0);
+  });
+});
+
+describe("contact-name disambiguation", () => {
+  let ctx: ModuleContext;
+  beforeAll(() => { ctx = wiredCtx({ APPLE_MCP_MESSAGES_DB: makeChatDb(), APPLE_MCP_CONTACTS_DIR: makeContactsDir() }); });
+
+  it("prefers the formal name when a pet-name card shares the number", async () => {
+    const r = await msg("messages_get_chat", { chatId: 1, limit: 50, includeReactions: false }, ctx);
+    expect(r.messages.find((m: any) => m.id === 1).senderName).toBe("Alex Rivera");
+  });
+
+  it("whole-word matches suppress substring noise", () => {
+    const names = candidatesForName(loadContacts(ctx), "alex").map((c) => c.name);
+    expect(names).toEqual(["Alex Chen", "Alex Rivera"]);
+    expect(candidatesForName(loadContacts(ctx), "alexand").map((c) => c.name)).toEqual(["Alexandria Dental"]);
+  });
+
+  it("breaks a tie by recent activity and says so", async () => {
+    const r = await msg("messages_get_chat", { contact: "Alex", limit: 5, includeReactions: false }, ctx);
+    expect(r).toMatchObject({ contact: "Alex Rivera", matchedBy: "recent-activity", alsoMatched: ["Alex Chen"] });
+  });
+
+  it("still refuses when two candidates are both active, and shows last-contact dates", async () => {
+    const path = makeChatDb();
+    const { DatabaseSync } = await import("node:sqlite");
+    const { isoToAppleNs } = await import("../src/modules/messages/db.js");
+    const db = new DatabaseSync(path);
+    db.exec("INSERT INTO handle VALUES (9,'+17635550123')");
+    db.prepare("INSERT INTO message (ROWID,guid,text,handle_id,date,is_from_me,service) VALUES (99,'m99','hi',9,?,0,'iMessage')").run(isoToAppleNs(new Date().toISOString()));
+    db.exec("INSERT INTO chat VALUES (9,'g9','+17635550123',NULL,'iMessage',45); INSERT INTO chat_handle_join VALUES (9,9); INSERT INTO chat_message_join VALUES (9,99)");
+    db.close();
+    const both = wiredCtx({ APPLE_MCP_MESSAGES_DB: path, APPLE_MCP_CONTACTS_DIR: makeContactsDir() });
+    await expect(msg("messages_get_chat", { contact: "Pat", limit: 5, includeReactions: false }, both))
+      .rejects.toThrow(/ambiguous: Pat Oldfriend \(last message \d{4}-\d{2}-\d{2}\), Pat Rivera \(last message/);
   });
 });
