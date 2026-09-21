@@ -145,7 +145,7 @@ describe("legacy date handling", () => {
 
 describe("masked search matching", () => {
   it("does not match secret values while redaction is enabled", async () => {
-    const ctx = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb({ secret: true }) } });
+    const ctx = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb() } });
     const hidden = await call("messages_search", { query: "hunter2", limit: 25, scanLimit: 50_000 }, ctx);
     expect(hidden.count).toBe(0);
     const label = await call("messages_search", { query: "password", limit: 25, scanLimit: 50_000 }, ctx);
@@ -155,9 +155,9 @@ describe("masked search matching", () => {
   });
 
   it("matches raw secret values when redaction is disabled", async () => {
-    const ctx = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb({ secret: true }), APPLE_MCP_REDACT: "off" } });
+    const ctx = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb(), APPLE_MCP_REDACT: "off" } });
     const result = await call("messages_search", { query: "hunter2", limit: 25, scanLimit: 50_000 }, ctx);
     expect(result.count).toBe(1);
-    expect(result.messages[0].text).toBe("password: hunter2 for the wifi");
+    expect(result.messages[0].text).toContain("hunter2!x");
   });
 });

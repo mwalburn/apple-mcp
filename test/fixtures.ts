@@ -12,7 +12,7 @@ import type { ModuleContext } from "../src/core/types.js";
  * all newer than the base rows. SQL cannot prefilter them, so they must be decoded
  * in Node — for tests that need to exhaust a scan limit.
  */
-export function makeChatDb(opts: { filler?: number; secret?: boolean } = {}): string {
+export function makeChatDb(opts: { filler?: number } = {}): string {
   const path = join(mkdtempSync(join(tmpdir(), "applemcp-")), "chat.db");
   const db = new DatabaseSync(path);
   db.exec(`
@@ -41,9 +41,7 @@ export function makeChatDb(opts: { filler?: number; secret?: boolean } = {}): st
     [6, 2, "100% sure_thing", null, 3, 50, 0, 0, 0],
     [7, 2, "Old message", null, 3, 60 * 24 * 400, 0, 0, 0],
   ];
-  if (!opts.secret) {
-    ins.run(9, "m9", "Username: walburns\npassword: hunter2!x", null, 0, at(40), 1, "iMessage", 0, 0); join_.run(1, 9);
-  }
+  ins.run(9, "m9", "Username: walburns\npassword: hunter2!x", null, 0, at(40), 1, "iMessage", 0, 0); join_.run(1, 9);
   ins.run(10, "m10", null, encodeAttributedBodyForTest("Your Chase verification code is 482913. Do not share it."), 3, at(30), 0, "SMS", 0, 0); join_.run(2, 10);
   // Legacy row: pre-High Sierra databases stored whole seconds, not nanoseconds.
   ins.run(8, "m8", "Legacy seconds row", null, 1, 500_000_000, 0, "SMS", 0, 0);
@@ -51,10 +49,6 @@ export function makeChatDb(opts: { filler?: number; secret?: boolean } = {}): st
   for (const [id, chat, text, blob, handle, minAgo, fromMe, attach, amt] of rows) {
     ins.run(id, `m${id}`, text, blob, handle, at(minAgo), fromMe, "iMessage", attach, amt);
     join_.run(chat, id);
-  }
-  if (opts.secret) {
-    ins.run(11, "m11", "password: hunter2 for the wifi", null, 1, 10, 0, 0, 0);
-    join_.run(1, 11);
   }
   for (let i = 0; i < (opts.filler ?? 0); i++) {
     const id = 1000 + i;
