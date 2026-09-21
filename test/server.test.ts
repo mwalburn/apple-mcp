@@ -40,6 +40,21 @@ describe("MCP server end to end", () => {
     expect(JSON.parse(res.content[0].text).count).toBe(2);
   });
 
+  it("accepts calendar days for message windows and rejects malformed dates", async () => {
+    const client = await connect(modules, { APPLE_MCP_MESSAGES_DB: makeChatDb() });
+    try {
+      const all: any = await client.callTool({ name: "messages_get_chat", arguments: { chatId: 1 } });
+      const message = JSON.parse(all.content[0].text).messages.find((m: any) => m.id === 1);
+      const day = message.date.slice(0, 10);
+      const filtered: any = await client.callTool({ name: "messages_get_chat", arguments: { chatId: 1, since: day } });
+      expect(JSON.parse(filtered.content[0].text).messages.some((m: any) => m.id === 1)).toBe(true);
+      const malformed: any = await client.callTool({ name: "messages_get_chat", arguments: { chatId: 1, since: "2026-9-20" } });
+      expect(malformed.isError).toBe(true);
+    } finally {
+      await client.close();
+    }
+  });
+
   it("returns failures as tool errors with the hint, not protocol crashes", async () => {
     const res: any = await (await connect(modules)).callTool({ name: "messages_recent", arguments: {} });
     expect(res.isError).toBe(true);

@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { UserFacingError, type ModuleContext } from "../../core/types.js";
+import { parseInstant } from "../../core/dates.js";
 import { decodeAttributedBody } from "./decode.js";
 
 const APPLE_EPOCH_OFFSET_S = 978_307_200; // 2001-01-01T00:00:00Z
@@ -57,7 +58,7 @@ export function appleMsToIso(ms: number | null): string | null {
   return new Date(ms + APPLE_EPOCH_OFFSET_S * 1000).toISOString();
 }
 export function isoToAppleNs(iso: string): bigint {
-  return (BigInt(Date.parse(iso)) - BigInt(APPLE_EPOCH_OFFSET_S) * 1000n) * 1_000_000n;
+  return (BigInt(parseInstant(iso)) - BigInt(APPLE_EPOCH_OFFSET_S) * 1000n) * 1_000_000n;
 }
 
 export interface MessageRow {
