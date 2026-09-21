@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
+import { isoInstant, parseInstant } from "../src/core/dates.js";
 import { decodeAttributedBody, encodeAttributedBodyForTest } from "../src/modules/messages/decode.js";
 import { appleMsToIso, isoToAppleNs, handleClause, escapeLike } from "../src/modules/messages/db.js";
 import { messagesModule } from "../src/modules/messages/index.js";
@@ -6,6 +7,18 @@ import { makeChatDb, fakeCtx } from "./fixtures.js";
 
 const tool = (n: string) => messagesModule.tools.find((t) => t.name === n)!;
 const call = (n: string, args: any, ctx: any) => tool(n).handler(args, ctx) as Promise<any>;
+
+describe("date parsing", () => {
+  it("parses calendar days at local midnight and preserves full instants", () => {
+    expect(parseInstant("2026-09-20")).toBe(new Date(2026, 8, 20).getTime());
+    const iso = "2026-09-20T12:34:56.000Z";
+    expect(parseInstant(iso)).toBe(Date.parse(iso));
+  });
+  it("rejects malformed calendar days and non-dates", () => {
+    expect(isoInstant.safeParse("2026-9-20").success).toBe(false);
+    expect(isoInstant.safeParse("yesterday").success).toBe(false);
+  });
+});
 
 describe("attributedBody decoder", () => {
   it("decodes short, 16-bit-length and unicode bodies", () => {
