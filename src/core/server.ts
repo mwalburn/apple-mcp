@@ -10,7 +10,7 @@ export function selectModules(all: AppModule[], cfg: ServerConfig): AppModule[] 
 }
 
 export function buildServer(modules: AppModule[], cfg: ServerConfig, ctx: ModuleContext): McpServer {
-  const server = new McpServer({ name: "apple-mcp", version: "0.3.1" });
+  const server = new McpServer({ name: "apple-mcp", version: "0.3.2" });
   const seen = new Set<string>();
   const selected = selectModules(modules, cfg);
 
