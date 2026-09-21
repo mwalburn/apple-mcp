@@ -108,7 +108,7 @@ Every message carries `id` (ROWID: monotonic, use as a watermark) and `guid` (gl
 
 **Name disambiguation.** Exact full name wins; then whole-word matches suppress substring noise ("Hope" no longer matches "Orthopedics"); then, if exactly one candidate has exchanged messages in the last 90 days, that one is chosen and the response says so via `matchedBy: "recent-activity"` and `alsoMatched`. Two active candidates is still an error that lists both with last-contact dates.
 
-**Redaction.** Message text is masked for credentials ("password: ..."), one-time codes, card numbers, SSNs and secret-sharing links (1Password, Bitwarden Send, and similar) before it leaves the server; affected messages carry `redacted: true`. Search still matches on the raw text but returns the masked form. This is pattern-based mitigation: an unusually phrased secret will get through.
+**Redaction.** Message text is masked for credentials ("password: ..."), one-time codes, card numbers, SSNs and secret-sharing links (1Password, Bitwarden Send, and similar) before it leaves the server; affected messages carry `redacted: true`. When redaction is enabled, search matches the masked form, so a query for a secret's value does not reveal that it exists. This is pattern-based mitigation: an unusually phrased secret will get through.
 
 With contacts enabled, every message carries `senderName`, chat participants carry `name`, and `messages_get_chat` / `messages_search` accept `contact: "Full Name"`. An ambiguous name returns the candidates rather than guessing. If contacts are unreadable, messages still work and return raw handles.
 

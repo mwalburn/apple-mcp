@@ -75,7 +75,7 @@ function resolveTarget(a: { handle?: string; contact?: string }, ctx: ModuleCont
   throw new UserFacingError(`"${a.contact}" is ambiguous: ${withActivity.map(describe).join(", ")}.`, "Retry with the full name, or pass `handle`.");
 }
 
-/** Last step before output: attach contact names, then mask secrets. Search matches on raw text before this runs. */
+/** Last step before output: attach contact names, then mask secrets. Search matches masked text when redaction is enabled. */
 function finalize<T extends Message>(msgs: T[], ctx: ModuleContext): T[] {
   const r = ctx.services.handleResolver;
   if (r) {
@@ -217,12 +217,14 @@ export const messagesModule: AppModule = {
           params.push(`%${escapeLike(a.query)}%`);
           const stmt = db.prepare(`${MESSAGE_SELECT} WHERE ${where.join(" AND ")} ORDER BY m.date DESC LIMIT ?`);
           const needle = a.query.toLowerCase();
+          const mask = redactionEnabled(ctx.env);
           const hits: Message[] = [];
           let scanned = 0;
           for (const row of stmt.iterate(...params, a.scanLimit) as Iterable<unknown>) {
             scanned++;
             const msg = toMessage(row as MessageRow);
-            if (msg.text?.toLowerCase().includes(needle)) {
+            const hay = mask ? redact(msg.text).text : msg.text;
+            if (hay?.toLowerCase().includes(needle)) {
               hits.push(msg);
               if (hits.length >= a.limit) break;
             }
