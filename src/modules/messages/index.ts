@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineTool, UserFacingError, type AppModule, type ModuleContext } from "../../core/types.js";
 import {
-  withDb, appleMsToIso, isoToAppleNs, DATE_MS, toMessage, handleClause, escapeLike,
+  withDb, appleMsToIso, dateBound, DATE_MS, toMessage, handleClause, escapeLike,
   MESSAGE_SELECT, NOT_REACTION, CHATS_WITH_HANDLE, type MessageRow, type Message,
 } from "./db.js";
 import { redact, redactionEnabled } from "./redact.js";
@@ -21,8 +21,8 @@ function scope(a: { chatId?: number; handles?: string[]; since?: string; until?:
     where.push(CHATS_WITH_HANDLE(`(${clauses.map((c) => c.sql).join(" OR ")})`));
     params.push(...clauses.map((c) => c.param));
   }
-  if (a.since) { where.push("m.date >= ?"); params.push(isoToAppleNs(a.since)); }
-  if (a.until) { where.push("m.date < ?"); params.push(isoToAppleNs(a.until)); }
+  if (a.since) { const bound = dateBound("m.date", ">=", a.since); where.push(bound.sql); params.push(...bound.params); }
+  if (a.until) { const bound = dateBound("m.date", "<", a.until); where.push(bound.sql); params.push(...bound.params); }
   if (!a.includeReactions) where.push(NOT_REACTION);
   return { where, params };
 }
@@ -116,15 +116,16 @@ export const messagesModule: AppModule = {
       },
       handler: async (a, ctx) =>
         withDb(ctx, (db) => {
-          const since = isoToAppleNs(new Date(Date.now() - a.sinceDays * 86_400_000).toISOString());
+          const since = new Date(Date.now() - a.sinceDays * 86_400_000).toISOString();
+          const bound = dateBound("m.date", ">=", since);
           const chats = db.prepare(`
             SELECT c.ROWID AS id, c.chat_identifier, c.display_name, c.service_name, c.style,
                    ${DATE_MS("MAX(m.date)")} AS last_ms, COUNT(m.ROWID) AS n
             FROM chat c
             JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
             JOIN message m ON m.ROWID = cmj.message_id
-            WHERE m.date >= ?
-            GROUP BY c.ROWID ORDER BY MAX(m.date) DESC LIMIT ?`).all(since, a.limit) as any[];
+            WHERE ${bound.sql}
+            GROUP BY c.ROWID ORDER BY MAX(m.date) DESC LIMIT ?`).all(...bound.params, a.limit) as any[];
           if (!chats.length) return { count: 0, chats: [] };
           const ids = chats.map((c) => c.id as number);
           const parts = db.prepare(`
