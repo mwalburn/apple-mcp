@@ -121,16 +121,18 @@ describe("full scripts through the osascript wrapper", () => {
     expect([a.events.n, b.events.n, c.events.n]).toEqual([2, 1, 0]);
   });
 
-  it("STATUS reports found: false for an id byId() rejects, and full detail otherwise", () => {
-    const rem = {
-      name: () => "Call plumber", container: () => ({ name: () => "Home" }), completed: () => false,
-      completionDate: () => null, dueDate: () => new Date("2026-09-21T01:00:00Z"), modificationDate: () => null,
-    };
-    const statusApp = { reminders: { byId: (id: string) => { if (id !== "b") throw new Error("not found"); return rem; } } };
-    expect(runScript(STATUS, { ids: ["b", "gone"] }, () => statusApp)).toEqual([
+  it("STATUS scans every list once and preserves input order", () => {
+    const home = fakeList("Home", rows);
+    const groceries = fakeList("Groceries", [{ id: "g1", name: "Bread", completed: true }]);
+    const mela = fakeList("Mela", [{ id: "m1", name: "Other", completed: false }]);
+    const statusApp = fakeApp([home.list, groceries.list, mela.list]);
+    expect(runScript(STATUS, { ids: ["b", "gone", "g1"] }, () => statusApp)).toEqual([
       { id: "b", found: true, name: "Call plumber", list: "Home", completed: false, completionDate: null, dueDate: "2026-09-21T01:00:00.000Z", modifiedAt: null },
       { id: "gone", found: false },
+      { id: "g1", found: true, name: "Bread", list: "Groceries", completed: true, completionDate: null, dueDate: null, modifiedAt: null },
     ]);
+    expect([home.events.n, groceries.events.n, mela.events.n]).toEqual([6, 6, 1]);
+    expect([home.events.whose, groceries.events.whose, mela.events.whose]).toEqual([0, 0, 0]);
   });
 
   it("GET_REMINDER returns every field and throws for an unknown id", () => {
