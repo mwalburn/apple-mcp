@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
+import { isoInstant, parseInstant } from "../src/core/dates.js";
 import { decodeAttributedBody, encodeAttributedBodyForTest } from "../src/modules/messages/decode.js";
 import { appleMsToIso, isoToAppleNs, dateBound, handleClause, escapeLike } from "../src/modules/messages/db.js";
 import { messagesModule } from "../src/modules/messages/index.js";
@@ -6,6 +7,18 @@ import { makeChatDb, fakeCtx } from "./fixtures.js";
 
 const tool = (n: string) => messagesModule.tools.find((t) => t.name === n)!;
 const call = (n: string, args: any, ctx: any) => tool(n).handler(args, ctx) as Promise<any>;
+
+describe("date parsing", () => {
+  it("parses calendar days at local midnight and preserves full instants", () => {
+    expect(parseInstant("2026-09-20")).toBe(new Date(2026, 8, 20).getTime());
+    const iso = "2026-09-20T12:34:56.000Z";
+    expect(parseInstant(iso)).toBe(Date.parse(iso));
+  });
+  it("rejects malformed calendar days and non-dates", () => {
+    expect(isoInstant.safeParse("2026-9-20").success).toBe(false);
+    expect(isoInstant.safeParse("yesterday").success).toBe(false);
+  });
+});
 
 describe("attributedBody decoder", () => {
   it("decodes short, 16-bit-length and unicode bodies", () => {
@@ -101,6 +114,14 @@ describe("messages tools against a fixture chat.db", () => {
     expect((await call("messages_search", { ...base, query: "zzz" }, ctx)).count).toBe(0);
   });
 
+  it("searches attributed bodies when the text column is blank", async () => {
+    const blank = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb({ blankText: true }) } });
+    const result = await call("messages_search", { query: "unique-blank-text-word", limit: 25, scanLimit: 50_000 }, blank);
+    expect(result.messages.map((m: any) => m.id)).toEqual([11]);
+    const chat = await call("messages_get_chat", { chatId: 2, limit: 50, includeReactions: false }, blank);
+    expect(chat.messages.find((m: any) => m.id === 11).text).toBe("unique-blank-text-word");
+  });
+
   it("reports scanned and truncated when scanLimit is exhausted before the window", async () => {
     const big = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb({ filler: 150 }) } });
     // 150 filler rows are newer than every base row, so a limit of 100 never reaches them.
@@ -171,5 +192,24 @@ describe("legacy date handling", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("masked search matching", () => {
+  it("does not match secret values while redaction is enabled", async () => {
+    const ctx = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb() } });
+    const hidden = await call("messages_search", { query: "hunter2", limit: 25, scanLimit: 50_000 }, ctx);
+    expect(hidden.count).toBe(0);
+    const label = await call("messages_search", { query: "password", limit: 25, scanLimit: 50_000 }, ctx);
+    expect(label.count).toBe(1);
+    expect(label.messages[0]).toMatchObject({ redacted: true, text: expect.stringContaining("[redacted]") });
+    expect(JSON.stringify(label)).not.toContain("hunter2");
+  });
+
+  it("matches raw secret values when redaction is disabled", async () => {
+    const ctx = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb(), APPLE_MCP_REDACT: "off" } });
+    const result = await call("messages_search", { query: "hunter2", limit: 25, scanLimit: 50_000 }, ctx);
+    expect(result.count).toBe(1);
+    expect(result.messages[0].text).toContain("hunter2!x");
   });
 });

@@ -1,17 +1,24 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { buildServer } from "../src/core/server.js";
+import { VERSION } from "../src/core/version.js";
 import { loadConfig } from "../src/core/config.js";
 import { adoptClaudeEnv } from "../src/core/claude-env.js";
 import { modules } from "../src/modules/index.js";
 import { defineTool, type AppModule } from "../src/core/types.js";
 import { makeChatDb, fakeCtx } from "./fixtures.js";
+
+describe("version", () => {
+  it("matches package.json", () => {
+    expect(VERSION).toBe(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
+  });
+});
 
 async function connect(mods: AppModule[], env: Record<string, string> = {}) {
   const ctx = fakeCtx({ env });
@@ -38,6 +45,21 @@ describe("MCP server end to end", () => {
     const res: any = await client.callTool({ name: "messages_list_chats", arguments: {} });
     expect(res.isError).toBeFalsy();
     expect(JSON.parse(res.content[0].text).count).toBe(2);
+  });
+
+  it("accepts calendar days for message windows and rejects malformed dates", async () => {
+    const client = await connect(modules, { APPLE_MCP_MESSAGES_DB: makeChatDb() });
+    try {
+      const all: any = await client.callTool({ name: "messages_get_chat", arguments: { chatId: 1 } });
+      const message = JSON.parse(all.content[0].text).messages.find((m: any) => m.id === 1);
+      const day = message.date.slice(0, 10);
+      const filtered: any = await client.callTool({ name: "messages_get_chat", arguments: { chatId: 1, since: day } });
+      expect(JSON.parse(filtered.content[0].text).messages.some((m: any) => m.id === 1)).toBe(true);
+      const malformed: any = await client.callTool({ name: "messages_get_chat", arguments: { chatId: 1, since: "2026-9-20" } });
+      expect(malformed.isError).toBe(true);
+    } finally {
+      await client.close();
+    }
   });
 
   it("returns failures as tool errors with the hint, not protocol crashes", async () => {
@@ -109,6 +131,7 @@ describe("MCP server over real stdio", () => {
     client.onerror = (e) => protocolErrors.push(e);
     try {
       await client.connect(transport);
+      expect(client.getServerVersion()?.version).toBe(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
       transport.stderr?.on("data", (d: Buffer) => stderr.push(d));
       const { tools } = await client.listTools();
       expect(tools.map((t) => t.name)).toEqual(["messages_list_chats", "messages_get_chat", "messages_recent", "messages_search", "messages_since"]);

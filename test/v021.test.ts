@@ -65,10 +65,13 @@ describe("messages v0.2.1", () => {
     expect(r.messages.find((m: any) => m.id === 10).text).toContain("code is [redacted]");
   });
 
-  it("search matches on raw text but never returns the secret", async () => {
+  it("search matches masked text and never returns the secret", async () => {
     const r = await msg("messages_search", { query: "hunter2", limit: 5, scanLimit: 1000 }, ctx);
-    expect(r.count).toBe(1);
-    expect(JSON.stringify(r)).not.toContain("hunter2");
+    expect(r.count).toBe(0);
+    const labeled = await msg("messages_search", { query: "password", limit: 5, scanLimit: 1000 }, ctx);
+    expect(labeled.count).toBe(1);
+    expect(labeled.messages[0]).toMatchObject({ redacted: true, text: expect.stringContaining("[redacted]") });
+    expect(JSON.stringify(labeled)).not.toContain("hunter2");
   });
 
   it("APPLE_MCP_REDACT=off disables masking", async () => {
