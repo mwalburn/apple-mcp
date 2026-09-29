@@ -6,10 +6,9 @@ import {
 } from "./db.js";
 import { redact, redactionEnabled } from "./redact.js";
 import type { DatabaseSync } from "node:sqlite";
+import { isoInstant } from "../../core/dates.js";
 
 type P = string | number | bigint;
-const isoDate = z.string().datetime({ offset: true });
-
 /** Shared WHERE builder for every message-returning tool. */
 function scope(a: { chatId?: number; handles?: string[]; since?: string; until?: string; includeReactions?: boolean }) {
   const where: string[] = [];
@@ -75,7 +74,7 @@ function resolveTarget(a: { handle?: string; contact?: string }, ctx: ModuleCont
   throw new UserFacingError(`"${a.contact}" is ambiguous: ${withActivity.map(describe).join(", ")}.`, "Retry with the full name, or pass `handle`.");
 }
 
-/** Last step before output: attach contact names, then mask secrets. Search matches on raw text before this runs. */
+/** Last step before output: attach contact names, then mask secrets. Search matches masked text when redaction is enabled. */
 function finalize<T extends Message>(msgs: T[], ctx: ModuleContext): T[] {
   const r = ctx.services.handleResolver;
   if (r) {
@@ -156,7 +155,7 @@ export const messagesModule: AppModule = {
       input: {
         chatId: z.number().int().optional(),
         ...targetInput,
-        since: isoDate.optional(), until: isoDate.optional(),
+        since: isoInstant.optional().describe("ISO 8601 datetime or YYYY-MM-DD (local midnight)."), until: isoInstant.optional().describe("ISO 8601 datetime or YYYY-MM-DD (local midnight)."),
         limit: z.number().int().min(1).max(500).default(50).describe("Most recent N within the window"),
         includeReactions: z.boolean().default(false).describe("Include tapbacks as separate entries"),
       },
@@ -204,7 +203,7 @@ export const messagesModule: AppModule = {
         query: z.string().min(2),
         chatId: z.number().int().optional(),
         ...targetInput,
-        since: isoDate.optional(), until: isoDate.optional(),
+        since: isoInstant.optional().describe("ISO 8601 datetime or YYYY-MM-DD (local midnight)."), until: isoInstant.optional().describe("ISO 8601 datetime or YYYY-MM-DD (local midnight)."),
         limit: z.number().int().min(1).max(200).default(25),
         scanLimit: z.number().int().min(100).max(500_000).default(50_000),
       },
@@ -213,16 +212,18 @@ export const messagesModule: AppModule = {
           const target = resolveTarget(a, ctx, db);
           const { where, params } = scope({ ...a, handles: target.handles });
           // Rows whose plain-text column exists but does not match can be dropped in SQL.
-          where.push(`((m.text IS NOT NULL AND m.text LIKE ? ESCAPE '\\') OR (m.text IS NULL AND m.attributedBody IS NOT NULL))`);
+          where.push(`((m.text IS NOT NULL AND TRIM(m.text) <> '' AND m.text LIKE ? ESCAPE '\\') OR ((m.text IS NULL OR TRIM(m.text) = '') AND m.attributedBody IS NOT NULL))`);
           params.push(`%${escapeLike(a.query)}%`);
           const stmt = db.prepare(`${MESSAGE_SELECT} WHERE ${where.join(" AND ")} ORDER BY m.date DESC LIMIT ?`);
           const needle = a.query.toLowerCase();
+          const mask = redactionEnabled(ctx.env);
           const hits: Message[] = [];
           let scanned = 0;
           for (const row of stmt.iterate(...params, a.scanLimit) as Iterable<unknown>) {
             scanned++;
             const msg = toMessage(row as MessageRow);
-            if (msg.text?.toLowerCase().includes(needle)) {
+            const hay = mask ? redact(msg.text).text : msg.text;
+            if (hay?.toLowerCase().includes(needle)) {
               hits.push(msg);
               if (hits.length >= a.limit) break;
             }
