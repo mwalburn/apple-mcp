@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { z } from "zod";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -12,7 +11,7 @@ import { loadConfig } from "../src/core/config.js";
 import { adoptClaudeEnv } from "../src/core/claude-env.js";
 import { modules } from "../src/modules/index.js";
 import { defineTool, type AppModule } from "../src/core/types.js";
-import { makeChatDb, fakeCtx } from "./fixtures.js";
+import { makeChatDb, makeTempDir, fakeCtx } from "./fixtures.js";
 
 describe("version", () => {
   it("matches package.json", () => {
@@ -148,7 +147,7 @@ describe("MCP server over real stdio", () => {
 
 describe("doctor: adoptClaudeEnv", () => {
   const cfgFile = (mcpServers: unknown) => {
-    const p = join(mkdtempSync(join(tmpdir(), "applemcp-claude-")), "claude_desktop_config.json");
+    const p = join(makeTempDir("applemcp-claude-"), "claude_desktop_config.json");
     writeFileSync(p, JSON.stringify({ mcpServers }));
     return p;
   };

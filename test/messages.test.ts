@@ -3,10 +3,18 @@ import { isoInstant, parseInstant } from "../src/core/dates.js";
 import { decodeAttributedBody, encodeAttributedBodyForTest } from "../src/modules/messages/decode.js";
 import { appleMsToIso, isoToAppleNs, dateBound, handleClause, escapeLike } from "../src/modules/messages/db.js";
 import { messagesModule } from "../src/modules/messages/index.js";
-import { makeChatDb, fakeCtx } from "./fixtures.js";
+import { contactsModule } from "../src/modules/contacts/index.js";
+import { makeChatDb, makeContactsDir, fakeCtx } from "./fixtures.js";
+import type { ModuleContext } from "../src/core/types.js";
 
 const tool = (n: string) => messagesModule.tools.find((t) => t.name === n)!;
 const call = (n: string, args: any, ctx: any) => tool(n).handler(args, ctx) as Promise<any>;
+const msg = (n: string, args: any, ctx: any) => tool(n).handler(args, ctx) as Promise<any>;
+function wired(env: Record<string, string>): ModuleContext {
+  const ctx = fakeCtx({ env });
+  Object.assign(ctx.services, contactsModule.provide!(ctx));
+  return ctx;
+}
 
 describe("date parsing", () => {
   it("parses calendar days at local midnight and preserves full instants", () => {
@@ -192,6 +200,94 @@ describe("legacy date handling", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("messages v0.2.1", () => {
+  let ctx: ModuleContext;
+  beforeAll(() => { ctx = wired({ APPLE_MCP_MESSAGES_DB: makeChatDb(), APPLE_MCP_CONTACTS_DIR: makeContactsDir() }); });
+
+  it("exposes guid and masks secrets on output, flagging that it did", async () => {
+    const r = await msg("messages_get_chat", { chatId: 1, limit: 50, includeReactions: false }, ctx);
+    const pw = r.messages.find((m: any) => m.id === 9);
+    expect(pw).toMatchObject({ guid: "m9", redacted: true });
+    expect(pw.text).toBe("Username: walburns\npassword: [redacted]");
+    expect(r.messages.find((m: any) => m.id === 1).redacted).toBeUndefined();
+  });
+
+  it("masks one-time codes that live in the binary body column", async () => {
+    const r = await msg("messages_get_chat", { chatId: 2, limit: 50, includeReactions: false }, ctx);
+    expect(r.messages.find((m: any) => m.id === 10).text).toContain("code is [redacted]");
+  });
+
+  it("APPLE_MCP_REDACT=off disables masking", async () => {
+    const off = wired({ APPLE_MCP_MESSAGES_DB: makeChatDb(), APPLE_MCP_REDACT: "off" });
+    const r = await msg("messages_get_chat", { chatId: 1, limit: 50, includeReactions: false }, off);
+    expect(r.messages.find((m: any) => m.id === 9).text).toContain("hunter2");
+  });
+});
+
+describe("messages_since", () => {
+  let ctx: ModuleContext;
+  beforeAll(() => { ctx = wired({ APPLE_MCP_MESSAGES_DB: makeChatDb(), APPLE_MCP_CONTACTS_DIR: makeContactsDir() }); });
+  const base = { limit: 500, includeReactions: false };
+
+  it("bootstraps to the current ceiling without reading anything", async () => {
+    expect(await msg("messages_since", base, ctx)).toEqual({ bootstrap: true, nextAfterId: 10, count: 0, messages: [] });
+  });
+
+  it("returns only rows above the watermark, oldest first, including my own replies", async () => {
+    const r = await msg("messages_since", { ...base, afterId: 5 }, ctx);
+    expect(r.messages.map((m: any) => m.id)).toEqual([6, 7, 8, 9, 10]);
+    expect(r.messages.find((m: any) => m.id === 9).fromMe).toBe(true);
+    expect(r).toMatchObject({ nextAfterId: 10, hasMore: false });
+  });
+
+  it("is idempotent: feeding nextAfterId back yields nothing", async () => {
+    const r = await msg("messages_since", { ...base, afterId: 10 }, ctx);
+    expect(r).toMatchObject({ count: 0, nextAfterId: 10, hasMore: false });
+  });
+
+  it("pages without loss: a truncated page resumes from its last row, not the ceiling", async () => {
+    const p1 = await msg("messages_since", { ...base, afterId: 0, limit: 3 }, ctx);
+    expect(p1).toMatchObject({ hasMore: true, nextAfterId: 3 });
+    const seen = [...p1.messages.map((m: any) => m.id)];
+    let after = p1.nextAfterId, more = true;
+    while (more) { const p = await msg("messages_since", { ...base, afterId: after, limit: 3 }, ctx); seen.push(...p.messages.map((m: any) => m.id)); after = p.nextAfterId; more = p.hasMore; }
+    expect(seen).toEqual([1, 2, 3, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("filters to an allowlist, still advances the watermark past everyone else's chatter", async () => {
+    const r = await msg("messages_since", { ...base, afterId: 0, contacts: ["Alex Rivera"] }, ctx);
+    expect(new Set(r.messages.map((m: any) => m.chatId))).toEqual(new Set([1]));
+    expect(r.nextAfterId).toBe(10);
+    expect(r.resolved).toEqual([{ contact: "Alex Rivera", matched: "Alex Rivera", matchedBy: "exact" }]);
+  });
+
+  it("an unresolvable name is reported, not fatal, so one typo cannot break a scheduled run", async () => {
+    const r = await msg("messages_since", { ...base, afterId: 0, contacts: ["Alex Rivera", "Nobody Here"] }, ctx);
+    expect(r.count).toBeGreaterThan(0);
+    expect(r.unresolved).toEqual([{ contact: "Nobody Here", reason: expect.stringMatching(/No contact/) }]);
+  });
+
+  it("filters by raw handles without touching Contacts, and merges them with resolved contacts", async () => {
+    const noContacts = fakeCtx({ env: { APPLE_MCP_MESSAGES_DB: makeChatDb() } });
+    const r = await msg("messages_since", { ...base, afterId: 0, handles: ["(612) 555-0199"] }, noContacts);
+    expect(r.messages.map((m: any) => m.id)).toEqual([5, 6, 7, 10]);
+    expect(r).toMatchObject({ nextAfterId: 10, resolved: [], unresolved: [] });
+    const both = await msg("messages_since", { ...base, afterId: 0, handles: ["+16125550199"], contacts: ["Alex Rivera"] }, ctx);
+    expect(both.messages.map((m: any) => m.id)).toEqual([1, 2, 3, 5, 6, 7, 8, 9, 10]);
+  });
+
+  it("includes tapbacks only when includeReactions is set", async () => {
+    const r = await msg("messages_since", { ...base, afterId: 3, includeReactions: true }, ctx);
+    expect(r.messages.map((m: any) => m.id)).toEqual([4, 5, 6, 7, 8, 9, 10]);
+    expect(r.messages[0]).toMatchObject({ id: 4, reaction: "loved" });
+  });
+
+  it("if NO allowlisted name resolves, returns nothing and holds the watermark rather than dumping every chat", async () => {
+    const r = await msg("messages_since", { ...base, afterId: 3, contacts: ["Nobody Here"] }, ctx);
+    expect(r).toMatchObject({ count: 0, nextAfterId: 3 });
   });
 });
 
