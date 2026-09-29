@@ -6,10 +6,9 @@ import {
 } from "./db.js";
 import { redact, redactionEnabled } from "./redact.js";
 import type { DatabaseSync } from "node:sqlite";
+import { isoInstant } from "../../core/dates.js";
 
 type P = string | number | bigint;
-const isoDate = z.string().datetime({ offset: true });
-
 /** Shared WHERE builder for every message-returning tool. */
 function scope(a: { chatId?: number; handles?: string[]; since?: string; until?: string; includeReactions?: boolean }) {
   const where: string[] = [];
@@ -156,7 +155,7 @@ export const messagesModule: AppModule = {
       input: {
         chatId: z.number().int().optional(),
         ...targetInput,
-        since: isoDate.optional(), until: isoDate.optional(),
+        since: isoInstant.optional().describe("ISO 8601 datetime or YYYY-MM-DD (local midnight)."), until: isoInstant.optional().describe("ISO 8601 datetime or YYYY-MM-DD (local midnight)."),
         limit: z.number().int().min(1).max(500).default(50).describe("Most recent N within the window"),
         includeReactions: z.boolean().default(false).describe("Include tapbacks as separate entries"),
       },
@@ -204,7 +203,7 @@ export const messagesModule: AppModule = {
         query: z.string().min(2),
         chatId: z.number().int().optional(),
         ...targetInput,
-        since: isoDate.optional(), until: isoDate.optional(),
+        since: isoInstant.optional().describe("ISO 8601 datetime or YYYY-MM-DD (local midnight)."), until: isoInstant.optional().describe("ISO 8601 datetime or YYYY-MM-DD (local midnight)."),
         limit: z.number().int().min(1).max(200).default(25),
         scanLimit: z.number().int().min(100).max(500_000).default(50_000),
       },

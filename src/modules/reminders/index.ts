@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { defineTool, type AppModule, type ModuleContext } from "../../core/types.js";
+import { isoInstant, parseInstant } from "../../core/dates.js";
 import { loadUrgency, urgencyOf } from "./store.js";
 import { LIST_LISTS, LIST_REMINDERS, INCOMPLETE_IDS, STATUS, GET_REMINDER } from "./scripts.js";
 
@@ -21,18 +22,18 @@ export function filterReminders(
   items: Reminder[],
   f: { dueBefore?: string; dueAfter?: string; modifiedAfter?: string; query?: string; flaggedOnly?: boolean; limit: number },
 ): Reminder[] {
-  const before = f.dueBefore ? Date.parse(f.dueBefore) : null;
-  const after = f.dueAfter ? Date.parse(f.dueAfter) : null;
+  const before = f.dueBefore ? parseInstant(f.dueBefore) : null;
+  const after = f.dueAfter ? parseInstant(f.dueAfter) : null;
   const q = f.query?.toLowerCase();
-  const modAfter = f.modifiedAfter ? Date.parse(f.modifiedAfter) : null;
+  const modAfter = f.modifiedAfter ? parseInstant(f.modifiedAfter) : null;
   return items
     .filter((r) => {
       if (f.flaggedOnly && !r.flagged) return false;
       // No modification date means we cannot prove it is unchanged: include it.
-      if (modAfter !== null && r.modifiedAt && Date.parse(r.modifiedAt) <= modAfter) return false;
+      if (modAfter !== null && r.modifiedAt && parseInstant(r.modifiedAt) <= modAfter) return false;
       if (before !== null || after !== null) {
         if (!r.dueDate) return false;
-        const t = Date.parse(r.dueDate);
+        const t = parseInstant(r.dueDate);
         if (before !== null && t >= before) return false;
         if (after !== null && t < after) return false;
       }
@@ -40,7 +41,7 @@ export function filterReminders(
       return true;
     })
     .sort((a, b) => {
-      if (a.dueDate && b.dueDate) return Date.parse(a.dueDate) - Date.parse(b.dueDate);
+      if (a.dueDate && b.dueDate) return parseInstant(a.dueDate) - parseInstant(b.dueDate);
       if (a.dueDate) return -1;
       if (b.dueDate) return 1;
       return a.name.localeCompare(b.name);
@@ -103,9 +104,9 @@ export const remindersModule: AppModule = {
       input: {
         list: z.string().optional().describe("Exact list name. Omit for all lists."),
         status: statusSchema,
-        dueBefore: z.string().datetime({ offset: true }).optional().describe("Exclusive upper bound"),
-        dueAfter: z.string().datetime({ offset: true }).optional().describe("Inclusive lower bound"),
-        modifiedAfter: z.string().datetime({ offset: true }).optional().describe("Only reminders created or changed after this instant. For incremental sync."),
+        dueBefore: isoInstant.optional().describe("Exclusive upper bound; ISO 8601 datetime or YYYY-MM-DD (local midnight)"),
+        dueAfter: isoInstant.optional().describe("Inclusive lower bound; ISO 8601 datetime or YYYY-MM-DD (local midnight)"),
+        modifiedAfter: isoInstant.optional().describe("Only reminders created or changed after this instant. For incremental sync. ISO 8601 datetime or YYYY-MM-DD (local midnight)"),
         flaggedOnly: z.boolean().default(false),
         limit: z.number().int().min(1).max(500).default(100),
       },
